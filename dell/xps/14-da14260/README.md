@@ -488,21 +488,94 @@ benchmarked per mode (12 s each, root, relay stopped):
 
 The sensor has a single native mode (3856×2176 @ 28.57 fps — matches Intel's "8MP/4K" spec) and
 the ISP scales in hardware, so every output size costs the same and >30 fps is impossible. The
-loopback therefore now advertises **3840×2160 NV12 @ 30/1** (real cadence ~28.6 fps). NV12 is
-icamerasrc's native output, making both `videoconvert` stages passthrough. Lower the
-width/height in the relay `output` caps if some consumer app struggles with 4K input.
+loopback then advertised **3840×2160 NV12 @ 30/1** (real cadence ~28.6 fps); it is now 1920×1080,
+because the ISP's 4K output turned out not to be clean (see the next section). NV12 is
+icamerasrc's native output, making both `videoconvert` stages passthrough.
+
+## Kernel 7.2: speakers, speaker ID, reboot crash, camera image (2026-10-11)
+
+Found and verified on a second DA14260 (Core Ultra X7 358H) on kernel 7.2.8.
+
+### Speakers: no sound card
+
+On 7.2 every CS35L57 amplifier fails to probe, and no sound card registers:
+
+```
+cs35l56 sdw:0:2:01fa:3557:01:2: error -EBUSY: Failed to get spk-id-gpios
+```
+
+ACPI lists `\_SB.GPI1` pin 20 (`GPP_F_20`) twice, both entries marked shared: as the CVS bridge's
+wake interrupt and as the speaker-ID input of all four amplifiers. The in-tree `intel_cvs`
+requests the line, so the amplifiers cannot. `speakers.nix` rebuilds two modules from the
+kernel's own source into `updates/` (`in-tree-module.nix`, so the kernel is not recompiled):
+
+- `intel_cvs` with `cvs-wake-irq.patch`, which takes the wake IRQ without claiming the GPIO.
+  Taken from Omarchy's linux-omarchy `0542`; the code is identical to Intel's fix on linux-media
+  (Junjie Cao, Cc: stable).
+- `snd-soc-cs35l56-shared` with `cs35l56-spk-id.patch` (Peter Petrov), which serializes the
+  amplifiers' exclusive requests for the shared line, since they otherwise race at boot, and
+  `cs35l56-spk-id-param.patch`, a `speaker_id` module parameter (below).
+
+Result: all four amplifiers bind, load firmware and calibration, `sof-soundwire` registers,
+PipeWire offers Speaker, Headphones, three HDMI outputs and the microphones, and
+`speaker-test -c 2 -t wav` plays from the correct sides, balanced.
+
+### Speaker ID: the pin belongs to the camera bridge
+
+With only the fixes above, one amplifier (link 2 unit 2, the first to load firmware) took the
+`spkid1` tuning in two boots out of two while the other three took `spkid0`. The `.wmfw` is the
+same for both IDs; the per-amplifier `.bin` tunings differ. Measured on the pin:
+
+| Condition | `GPP_F_20` |
+|---|---|
+| Bridge running | 0, even with the pad's 5 kΩ pull-up on: the bridge drives the line |
+| Bridge held in reset (`GPP_E_10` low, bridge gone from USB) | follows the pad's pull; with the pull removed it reads 0 at once: a board pull-down |
+| `intel_cvs` blacklisted (bridge left running by firmware) | all four amplifiers take `spkid0` |
+
+So the board says 0, and a running bridge masks the strap anyway: the stray 1 comes from an
+amplifier that reads the pin while `intel_cvs` restarts the bridge. Another DA14260, tested in
+omacom/omarchy-pkgs#419, also loads `spkid0` on all four. `hardware.dell-xps-14-da14260.speakerId`
+therefore defaults to 0 (passed as `snd_soc_cs35l56_shared.speaker_id`); set it to `null` to read
+the pin as the stock driver does.
+
+### Reboot crash in PSys
+
+Reported by andreas705 on nixos-hardware#1912: since intel/ipu7-drivers `0e8c71a`, its copy of
+`ipu7-bus.h` has two fields the in-tree core never allocates. PSys probe writes past
+`struct ipu7_bus_device` into the next slab object, and about one reboot in three ends in
+`list_del corruption` in `device_shutdown`. `ipu7-drivers` now compiles against the running
+kernel's staging headers with his `in-tree-abi.patch`, which he verified with `slub_debug`. Here the
+built module no longer contains `get_running_fw_task_count`, and three shutdowns since have been
+clean, which on its own is weak evidence for a one-in-three bug.
+
+### Camera image
+
+- The relay outputs 1920×1080 instead of 4K. andreas705 measured a fixed 4-pixel grid in the
+  ISP's 4K output, and at 4K the HAL sometimes passes along a ~6-frame-old image, seen as motion
+  trails (also omacom/omarchy-pkgs#723). ISP-scaled 1080p has neither.
+- Omarchy's HAL fixes `0008` (honour `color-range=reduced`) and `0010` (scale analog gain codes to
+  the ov08x40 driver's units), and icamerasrc `0009` (`fps-range`). The relay input is
+  `icamerasrc fps-range=15~30 gain-range=0~27 color-range=reduced`. `0011` is left out: it caused
+  motion trails at 1080p for andreas705.
+- WirePlumber's libcamera monitor is disabled. Its "Built-in Front Camera" took the sensor from
+  the relay, so choosing it blinked the LED and showed nothing.
+
+Result: PipeWire lists only "Intel IPU7 Camera", frames are 1080p NV12 in limited range, and the
+picture works in Cheese.
 
 ## Status
 
-RGB camera **working** end-to-end through the **hardware ISP**: 3840×2160 (4K) at ~28.6 fps,
+RGB camera **working** end-to-end through the **hardware ISP**: 1920×1080 at up to ~28.6 fps (auto
+exposure slows toward 15 fps in dim light),
 upright/mirrored, low-latency, properly colour-corrected (AIQ tuning), usable by any V4L2 app
 (cheese / Firefox / Chrome / conferencing). Requires allowing the unfree `ipu7-camera-bins`
 blobs (see above).
 
 Microphone **working** on kernel ≥ 7.0 (enforced as a `mkDefault` in the profile — see above).
 
-Speakers **working untuned** out of the box; vendor-style voicing is **opt-in** via
-`hardware.dell-xps-14-da14260.speakerTuning.enable = true;` (a PipeWire filter-chain, no blob).
+Speakers **working untuned**; on kernel ≥ 7.2 that needs `speakers.nix` (see above). Vendor-style
+voicing is **opt-in** via `hardware.dell-xps-14-da14260.speakerTuning.enable = true;` (a PipeWire
+filter-chain, no blob).
 Mechanically confirmed on a DA14260: the sink appears, wins the default-output election at
 `priority.session = 800`, and passes audio — which also confirms the LV2 limiter loaded, since a
 missing plugin fails the whole graph rather than degrading it. Measured level matches the
@@ -568,3 +641,10 @@ been re-confirmed since the recorder landed here.
 10. Ask for a stable backport of mainline `4fdb0342f05e` to 7.1.y — new device IDs are explicitly
    in scope for stable. If it lands, this patch expires on its own; note that it will then start
    failing to apply, so the version gate needs updating at that point.
+11. Drop `cvs-wake-irq.patch` once Intel's fix reaches the kernel this profile runs; the in-tree
+   `intel_cvs` rebuild in `speakers.nix` goes with it.
+12. Report the shared speaker-ID/wake pin to Cirrus (cs35l56) and Dell with the measurements above;
+   a kernel quirk for this board would replace the `speaker_id` parameter. Send the speaker-ID
+   serialization upstream with it.
+13. Send `ipu7-drivers/in-tree-abi.patch` upstream (intel/ipu7-drivers, and the copy in
+   nixpkgs #542085).
