@@ -1,0 +1,35 @@
+Serialize the shared speaker-ID GPIO request across the four CS35L57 amplifiers.
+From Peter Petrov's XPS 14 commissioning patch.
+
+--- a/sound/soc/codecs/cs35l56-shared.c
++++ b/sound/soc/codecs/cs35l56-shared.c
+@@ -14,6 +14,7 @@
+ #include <linux/fs.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/kstrtox.h>
++#include <linux/mutex.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/regmap.h>
+ #include <linux/regulator/consumer.h>
+@@ -1535,6 +1536,8 @@
+ }
+ EXPORT_SYMBOL_NS_GPL(cs35l56_hw_init, "SND_SOC_CS35L56_SHARED");
+ 
++static DEFINE_MUTEX(cs35l56_spk_id_lock);
++
+ int cs35l56_get_speaker_id(struct cs35l56_base *cs35l56_base)
+ {
+ 	struct gpio_descs *descs;
+@@ -1557,6 +1560,12 @@
+ 		dev_dbg(cs35l56_base->dev, "Speaker ID = %d\n", speaker_id);
+ 		return speaker_id;
+ 	}
++
++	/*
++	 * Amplifiers can share one board speaker-ID GPIO. Serialize the
++	 * exclusive request through release across driver instances.
++	 */
++	guard(mutex)(&cs35l56_spk_id_lock);
+ 
+ 	/* Read the speaker type qualifier from the motherboard GPIOs */
+ 	descs = gpiod_get_array_optional(cs35l56_base->dev, "spk-id", GPIOD_IN);

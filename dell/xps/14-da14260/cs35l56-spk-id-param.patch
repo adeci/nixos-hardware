@@ -1,0 +1,33 @@
+Add a speaker_id module parameter that overrides speaker-ID detection.
+On the DA14260 the speaker-ID GPIO is also the Intel CVS bridge's wake
+line, which the bridge drives, so detection is not reliable there.
+
+--- a/sound/soc/codecs/cs35l56-shared.c
++++ b/sound/soc/codecs/cs35l56-shared.c
+@@ -1538,12 +1538,26 @@
+ 
+ static DEFINE_MUTEX(cs35l56_spk_id_lock);
+ 
++/*
++ * Some boards share the speaker-ID GPIO with another device that drives it,
++ * so reading it gives a different ID depending on when each amplifier probes.
++ */
++static int speaker_id_param = -1;
++module_param_named(speaker_id, speaker_id_param, int, 0444);
++MODULE_PARM_DESC(speaker_id, "Speaker ID to use instead of detecting it (-1 = detect)");
++
+ int cs35l56_get_speaker_id(struct cs35l56_base *cs35l56_base)
+ {
+ 	struct gpio_descs *descs;
+ 	u32 speaker_id;
+ 	int i, ret;
+ 
++	if (speaker_id_param >= 0) {
++		dev_info(cs35l56_base->dev, "Speaker ID = %d (module parameter)\n",
++			 speaker_id_param);
++		return speaker_id_param;
++	}
++
+ 	/* Check for vendor-specific speaker ID method */
+ 	ret = cs_amp_get_vendor_spkid(cs35l56_base->dev);
+ 	if (ret >= 0) {

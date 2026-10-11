@@ -24,6 +24,8 @@ in
     ./ir-camera.nix
     # Opt-in speaker voicing; see hardware.dell-xps-14-da14260.speakerTuning.
     ./speaker-tuning.nix
+    # Speakers on >= 7.2; see hardware.dell-xps-14-da14260.speakerId.
+    ./speakers.nix
   ];
 
   # We need at least 7.0 to have a working mic
