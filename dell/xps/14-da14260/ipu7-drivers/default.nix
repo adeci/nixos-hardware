@@ -23,6 +23,21 @@ stdenv.mkDerivation {
     hash = "sha256-a2hIJ4wMCHQeDb4gp+5pjLizJ/CCfA0JivVDWeqB4vY=";
   };
 
+  # The repo carries its own copy of the core's headers, and since 0e8c71a its
+  # struct ipu7_bus_device has two fields the in-tree core never allocates.
+  # PSys probe wrote one of them past the 1008-byte struct into the next slab
+  # object, which crashed about one reboot in three in device_shutdown (list_del
+  # corruption). Compile against the running kernel's staging headers instead,
+  # and drop the code using those fields: it pairs with the out-of-tree MMU
+  # code, which is not loaded alongside the in-tree core. From andreas705 on
+  # nixos-hardware#1912, verified clean with slub_debug.
+  patches = [ ./in-tree-abi.patch ];
+
+  postPatch = ''
+    tar -xf ${kernel.src} --strip-components=5 -C drivers/media/pci/intel/ipu7 \
+      --wildcards '*/drivers/staging/media/ipu7/*.h'
+  '';
+
   nativeBuildInputs = kernel.moduleBuildDependencies;
 
   makeFlags = [
