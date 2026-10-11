@@ -54,7 +54,21 @@ stdenv.mkDerivation {
   # PR #59 only converted the ipu8 sensor config to the CVS-routed topology;
   # apply the same change (Intel CVS pad formats + sensor->CVS->CSI2 links)
   # to the ipu75xa ov08x40 config this laptop uses.
-  patches = [ ./ipu75xa-ov08x40-cvs.patch ];
+  #
+  # Then two image fixes from Omarchy's intel-ipu7-camera (omacom/omarchy-pkgs
+  # 97925fb), tested on this laptop by andreas705 on nixos-hardware#1912:
+  # - 0008: honour color-range=reduced. The HAL always emitted full-range YUV,
+  #   which consumers decode as limited range, crushing shadows and clipping
+  #   highlights.
+  # - 0010: scale AIQ's analog gain codes to the ov08x40 driver's units; the
+  #   sensor ran at twice the gain AE and the noise model assumed.
+  # Omarchy's 0011 (default ISP tuning for missing modes) is left out: it
+  # caused motion trails at 1080p.
+  patches = [
+    ./ipu75xa-ov08x40-cvs.patch
+    ./0008-camhal-honor-the-reduced-YUV-color-range.patch
+    ./0010-camhal-scale-analog-gain-codes-to-the-ov08x40-driver-units.patch
+  ];
 
   __structuredAttrs = true;
   strictDeps = true;

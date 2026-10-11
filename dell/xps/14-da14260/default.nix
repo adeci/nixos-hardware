@@ -176,21 +176,29 @@ in
       # so the input pipeline fails to build and only the black splash is shown.
       # v4l2-relayd applies the caps (copied from the output appsrc below) to its
       # internal appsink instead.
-      input = "icamerasrc ! videoconvert ! videoscale ! videoflip method=vertical-flip";
+      #
+      # The icamerasrc properties follow Omarchy's relay: fps-range and
+      # gain-range let AE drop to 15 fps in dim light rather than hold 30 fps
+      # at ~48x gain, and color-range=reduced makes the ISP emit the limited
+      # range every consumer decodes NV12 webcam frames as. fps-range and a
+      # working color-range come from the icamerasrc and HAL patches.
+      input = "icamerasrc fps-range=15~30 gain-range=0~27 color-range=reduced ! videoconvert ! videoscale ! videoflip method=vertical-flip";
 
       # A leaky queue (drops old frames) + sync=false keep latency low so the
       # viewer sees the latest frame instead of a backlog; the -b 4 buffers in
       # preStart are enough to sustain full framerate without adding lag.
       #
-      # 3840x2160 NV12: the sensor has a single native mode (3856x2176 @
-      # 28.57 fps) and the hardware ISP scales, so 4K costs nothing over 720p —
-      # benchmarked ~28.6 fps with zero drops at 720p/1080p/4K, flip included
-      # (higher framerates are not possible: the sensor ignores 60/1 caps and
-      # keeps its native cadence). NV12 is icamerasrc's native output, so the
-      # videoconvert stages are passthrough instead of per-frame conversions.
-      # Lower width/height here if a consumer struggles with 4K input.
+      # 1920x1080 NV12: the sensor has a single native mode (3856x2176 @
+      # 28.57 fps) and the hardware ISP scales it (higher framerates are not
+      # possible: the sensor ignores 60/1 caps and keeps its native cadence).
+      # 4K output is not clean: the ISP's full-resolution frames carry a fixed
+      # 4-pixel grid in flat areas, and at 4K Intel's parameter adaptation
+      # sometimes passes along a ~6-frame-old intermediate image, seen as
+      # motion trails. ISP-scaled 1080p has neither (andreas705 on
+      # nixos-hardware#1912; omacom/omarchy-pkgs#723). NV12 is icamerasrc's
+      # native output, so the videoconvert stages are passthrough.
       output =
-        "appsrc name=appsrc caps=video/x-raw,format=NV12,width=3840,height=2160,framerate=30/1"
+        "appsrc name=appsrc caps=video/x-raw,format=NV12,width=1920,height=1080,framerate=30/1"
         + " ! queue leaky=downstream max-size-buffers=3 ! videoconvert ! v4l2sink name=v4l2sink device=$(cat ${deviceFile}) sync=false";
     in
     {

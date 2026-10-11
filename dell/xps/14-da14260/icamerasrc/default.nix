@@ -27,6 +27,11 @@ stdenv.mkDerivation {
     hash = "sha256-BYURJfNz4D8bXbSeuWyUYnoifozFOq6rSfG9GBKVoHo=";
   };
 
+  # Adds an fps-range property so auto exposure can lengthen frames in dim
+  # light instead of only adding gain; upstream pins AE to exactly 1/30 s.
+  # From Omarchy's intel-ipu7-camera (omacom/omarchy-pkgs 97925fb).
+  patches = [ ./0009-icamerasrc-add-an-fps-range-property-for-auto-exposure.patch ];
+
   nativeBuildInputs = [
     autoreconfHook
     pkg-config
