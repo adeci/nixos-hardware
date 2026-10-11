@@ -137,6 +137,15 @@ in
     ];
   };
 
+  # Hide WirePlumber's libcamera source too. It offers the same OV08X40 as a
+  # second camera ("Built-in Front Camera") through the untuned software ISP,
+  # and opening it takes the sensor from the relay below, so neither works:
+  # the privacy LED blinks and no frames arrive. mkDefault for the same reason
+  # as above.
+  services.pipewire.wireplumber.extraConfig."50-disable-libcamera-ipu7" = lib.mkDefault {
+    "wireplumber.profiles".main."monitor.libcamera" = "disabled";
+  };
+
   # The IPU7 camera is driven through the Intel camera HAL (hardware ISP with
   # per-sensor AIQ tuning — proper colours, low CPU), but applications only
   # speak V4L2 and cannot use the HAL directly. v4l2-relayd runs a GStreamer
