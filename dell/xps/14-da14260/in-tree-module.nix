@@ -1,6 +1,7 @@
 {
   lib,
   kernel,
+  kernelModuleMakeFlags,
   pname,
   # Source directory of the module inside the kernel tree.
   dir,
@@ -48,14 +49,19 @@ kernel.stdenv.mkDerivation {
     ${module}-y := ${lib.concatStringsSep " " objects}
     EOF
     make -C ${kernel.dev}/lib/modules/${kernel.modDirVersion}/build \
+      ${lib.escapeShellArgs kernelModuleMakeFlags} \
       M="$PWD/${dir}" -j"$NIX_BUILD_CORES" modules
     runHook postBuild
   '';
 
+  # modules_install signs the module (nixpkgs writes a .ko.cer beside it),
+  # which the kernel's module aggregation requires.
   installPhase = ''
     runHook preInstall
-    install -Dm644 ${dir}/${module}.ko \
-      $out/lib/modules/${kernel.modDirVersion}/updates/${module}.ko
+    make -C ${kernel.dev}/lib/modules/${kernel.modDirVersion}/build \
+      ${lib.escapeShellArgs kernelModuleMakeFlags} \
+      M="$PWD/${dir}" INSTALL_MOD_PATH=$out INSTALL_MOD_DIR=updates DEPMOD=true \
+      modules_install
     runHook postInstall
   '';
 
